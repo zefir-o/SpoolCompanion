@@ -23,14 +23,18 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
@@ -75,7 +79,14 @@ fun HomeScreen(
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     selectedSort: SortOption,
-    isSortAscending: Boolean
+    isSortAscending: Boolean,
+    locationAssignmentState: SpoolViewModel.LocationAssignmentState,
+    availableLocations: List<String>,
+    isLoadingLocations: Boolean,
+    locationsErrorMessage: String?,
+    onAssignSpoolLocation: (Int, String) -> Unit,
+    onLoadLocations: () -> Unit,
+    onResetLocationAssignmentState: () -> Unit
 ) {
     // Show an error dialog for NFC write failures.
     val writeErrorMessage = nfcTagViewModel.writeErrorMessage
@@ -87,14 +98,38 @@ fun HomeScreen(
     }
     // Show a read dialog when a tag is scanned outside of write mode.
     val readTagInfo = nfcTagViewModel.readTagInfo
+    LaunchedEffect(locationAssignmentState) {
+        if (locationAssignmentState is SpoolViewModel.LocationAssignmentState.Success &&
+            readTagInfo != null
+        ) {
+            nfcTagViewModel.readTagInfo = null
+            onResetLocationAssignmentState()
+        }
+    }
     if (readTagInfo != null) {
         val spool = (uiState as? SpoolViewModel.UiState.Success)
             ?.spools
             ?.firstOrNull { it.id == readTagInfo.spoolId }
+        LaunchedEffect(readTagInfo.tagId) {
+            onResetLocationAssignmentState()
+            onLoadLocations()
+        }
         ReadTagDialog(
             readTagInfo = readTagInfo,
             spool = spool,
-            onDismiss = { nfcTagViewModel.readTagInfo = null }
+            locationAssignmentState = locationAssignmentState,
+            availableLocations = availableLocations,
+            isLoadingLocations = isLoadingLocations,
+            locationsErrorMessage = locationsErrorMessage,
+            onAssign = { location ->
+                readTagInfo.spoolId?.let { spoolId ->
+                    onAssignSpoolLocation(spoolId, location)
+                }
+            },
+            onDismiss = {
+                nfcTagViewModel.readTagInfo = null
+                onResetLocationAssignmentState()
+            }
         )
     }
     when (uiState) {
@@ -657,6 +692,11 @@ fun WriteErrorDialog(
 fun ReadTagDialog(
     readTagInfo: ReadTagInfo,
     spool: SpoolListEntry?,
+    locationAssignmentState: SpoolViewModel.LocationAssignmentState,
+    availableLocations: List<String>,
+    isLoadingLocations: Boolean,
+    locationsErrorMessage: String?,
+    onAssign: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -793,6 +833,108 @@ fun ReadTagDialog(
                         Row {
                             Text(text = "Raw payload:", color = labelColor)
                             Text(text = readTagInfo.rawText, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                }
+
+                if (readTagInfo.spoolId != null) {
+                    var location by remember(
+                        readTagInfo.tagId,
+                        readTagInfo.spoolId,
+                        spool?.location,
+                        availableLocations
+                    ) {
+                        mutableStateOf(spool?.location.orEmpty())
+                    }
+                    var isLocationMenuExpanded by remember(readTagInfo.tagId) {
+                        mutableStateOf(false)
+                    }
+                    val isAssigning = locationAssignmentState is
+                        SpoolViewModel.LocationAssignmentState.Assigning
+                    when {
+                        isLoadingLocations -> {
+                            Text(text = "Loading locations...")
+                        }
+                        locationsErrorMessage != null -> {
+                            Text(
+                                text = locationsErrorMessage,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        availableLocations.isEmpty() -> {
+                            Text(text = "No locations available in Spoolman.")
+                        }
+                        else -> {
+                            Box {
+                                OutlinedButton(
+                                    onClick = { isLocationMenuExpanded = true },
+                                    enabled = !isAssigning,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = location.ifEmpty { "Choose a location" },
+                                            modifier = Modifier.weight(1f),
+                                            color = if (location.isEmpty()) {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                        Icon(
+                                            painter = painterResource(id = android.R.drawable.arrow_down_float),
+                                            contentDescription = "Choose location"
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = isLocationMenuExpanded,
+                                    onDismissRequest = { isLocationMenuExpanded = false }
+                                ) {
+                                    availableLocations.forEach { availableLocation ->
+                                        DropdownMenuItem(
+                                            text = { Text(text = availableLocation) },
+                                            onClick = {
+                                                location = availableLocation
+                                                isLocationMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    when (locationAssignmentState) {
+                        is SpoolViewModel.LocationAssignmentState.Error -> {
+                            Text(
+                                text = locationAssignmentState.message,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        SpoolViewModel.LocationAssignmentState.Success -> {
+                            Text(
+                                text = "Location assigned",
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        else -> Unit
+                    }
+                    Button(
+                        onClick = { onAssign(location) },
+                        enabled = location in availableLocations && !isAssigning &&
+                            !isLoadingLocations && locationsErrorMessage == null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isAssigning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(text = "Assign")
                         }
                     }
                 }

@@ -16,5 +16,6 @@ data class SpoolItem(
     val spool_weight: Double = 0.0,
     val used_length: Double = 0.0,
     val used_weight: Double = 0.0,
+    val location: String? = null,
     val comment: String = ""
 )

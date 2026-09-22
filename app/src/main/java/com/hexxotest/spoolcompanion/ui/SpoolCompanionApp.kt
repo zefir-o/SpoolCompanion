@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hexxotest.spoolcompanion.R
+import com.hexxotest.spoolcompanion.network.normalizeSpoolmanUrl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +148,18 @@ fun SpoolCompanionApp(nfcTagViewModel: NfcTagViewModel) {
                     isRefreshing = spoolViewModel.isRefreshing,
                     onRefresh = { spoolViewModel.refreshSpools() },
                     selectedSort = selectedSort,
-                    isSortAscending = isSortAscending
+                    isSortAscending = isSortAscending,
+                    locationAssignmentState = spoolViewModel.locationAssignmentState,
+                    availableLocations = spoolViewModel.availableLocations,
+                    isLoadingLocations = spoolViewModel.isLoadingLocations,
+                    locationsErrorMessage = spoolViewModel.locationsErrorMessage,
+                    onAssignSpoolLocation = { spoolId, location ->
+                        spoolViewModel.assignSpoolLocation(spoolId, location)
+                    },
+                    onLoadLocations = { spoolViewModel.loadLocations() },
+                    onResetLocationAssignmentState = {
+                        spoolViewModel.resetLocationAssignmentState()
+                    }
                 )
             } else {
                 NoUrlApp()
@@ -194,7 +206,7 @@ fun SettingsDialog(
             Button(
                 onClick = {
                     // Normalize user input to avoid trailing slashes in the base URL.
-                    val cleaned = (spoolmanUrl.value ?: "").trim().removeSuffix("/")
+                    val cleaned = normalizeSpoolmanUrl(spoolmanUrl.value ?: "")
                     spoolmanUrl.value = cleaned
                     onConfirm()
                 })

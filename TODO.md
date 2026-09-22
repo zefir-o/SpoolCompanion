@@ -16,6 +16,7 @@
 
 ## FEATURES
  - [ ] Handle a Spoolman property (like `tag_written`) to retrieve/record if this spool has a tag attached (and filter the list ?)
- - [ ] Handle `http://` and `https://` URLs in the settings page, when not inputted by user
+ - [x] Handle `http://` and `https://` URLs in the settings page, when not inputted by user
  - [x] Add a popup with spool info when NFC detect a tag
  - [x] Show spool ID and remaining filament in main screen (useful for finding the right spool at first glance)
+ - [x] Assign spool location from the NFC read dialog

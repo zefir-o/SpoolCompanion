@@ -24,6 +24,8 @@ And all this, from your mobile phone !
 - Spool list with color swatches, material, diameter, weight, and remaining filament bar.
 - NFC write flow with a dedicated dialog and safe error handling for non‑NDEF tags.
 - NFC read flow that shows tag details and spool information when available.
+- Assign a spool location in Spoolman directly from the NFC read dialog.
+- Location assignment uses existing Spoolman locations and releases only the spool already occupying the selected location.
 
 ## Screenshots
 

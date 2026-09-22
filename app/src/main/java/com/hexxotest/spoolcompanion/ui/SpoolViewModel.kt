@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.hexxotest.spoolcompanion.models.SpoolListEntry
 import com.hexxotest.spoolcompanion.network.SpoolApi
+import com.hexxotest.spoolcompanion.network.SpoolLocationUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,7 +28,26 @@ class SpoolViewModel(spoolmanUrl: String) : ViewModel() {
         data object Loading : UiState
     }
 
+    sealed interface LocationAssignmentState {
+        data object Idle : LocationAssignmentState
+        data object Assigning : LocationAssignmentState
+        data object Success : LocationAssignmentState
+        data class Error(val message: String) : LocationAssignmentState
+    }
+
     var currentUiState: UiState by mutableStateOf(UiState.Loading)
+        private set
+
+    var locationAssignmentState: LocationAssignmentState by mutableStateOf(LocationAssignmentState.Idle)
+        private set
+
+    var availableLocations: List<String> by mutableStateOf(emptyList())
+        private set
+
+    var isLoadingLocations: Boolean by mutableStateOf(false)
+        private set
+
+    var locationsErrorMessage: String? by mutableStateOf(null)
         private set
 
     // Tracks swipe-to-refresh progress without forcing the full-screen loading UI.
@@ -36,10 +56,96 @@ class SpoolViewModel(spoolmanUrl: String) : ViewModel() {
 
     init {
         loadSpools(initialLoad = true)
+        loadLocations()
     }
 
     fun refreshSpools() {
         loadSpools(initialLoad = false)
+    }
+
+    fun loadLocations() {
+        if (isLoadingLocations) {
+            return
+        }
+        viewModelScope.launch {
+            isLoadingLocations = true
+            locationsErrorMessage = null
+            try {
+                val locationsFromServer = SpoolApi(baseUrl = url).retrofitService.getLocations()
+                availableLocations = locationsFromServer
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .sorted()
+            } catch (e: Exception) {
+                Log.e("SpoolViewModel", "Failed to fetch spool locations", e)
+                locationsErrorMessage = e.message ?: "Failed to load spool locations."
+            } finally {
+                isLoadingLocations = false
+            }
+        }
+    }
+
+    fun assignSpoolLocation(spoolId: Int, location: String) {
+        val normalizedLocation = location.trim()
+        if (normalizedLocation.isEmpty()) {
+            locationAssignmentState = LocationAssignmentState.Error("Location cannot be empty.")
+            return
+        }
+        if (normalizedLocation !in availableLocations) {
+            locationAssignmentState = LocationAssignmentState.Error(
+                "Select a location from the available locations."
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            locationAssignmentState = LocationAssignmentState.Assigning
+            try {
+                val spoolApi = SpoolApi(baseUrl = url).retrofitService
+                // Refresh from Spoolman so only spools currently occupying the
+                // selected destination location are released.
+                val spoolsInDestination = spoolApi.getSpoolList(allowArchived = true)
+                    .filter { spool ->
+                        spool.id != spoolId && spool.location?.trim() == normalizedLocation
+                    }
+                spoolsInDestination.forEach { spool ->
+                    spoolApi.updateSpoolLocation(
+                        spoolId = spool.id,
+                        request = SpoolLocationUpdate(location = null)
+                    )
+                }
+                spoolApi.updateSpoolLocation(
+                    spoolId = spoolId,
+                    request = SpoolLocationUpdate(location = normalizedLocation)
+                )
+                val state = currentUiState
+                if (state is UiState.Success) {
+                    currentUiState = state.copy(
+                        spools = state.spools.map { spool ->
+                            when {
+                                spool.id == spoolId -> spool.copy(location = normalizedLocation)
+                                spoolsInDestination.any { occupied -> occupied.id == spool.id } -> {
+                                    spool.copy(location = "")
+                                }
+                                else -> spool
+                            }
+                        }
+                    )
+                }
+                locationAssignmentState = LocationAssignmentState.Success
+                loadLocations()
+            } catch (e: Exception) {
+                Log.e("SpoolViewModel", "Failed to update spool location", e)
+                locationAssignmentState = LocationAssignmentState.Error(
+                    e.message ?: "Failed to update spool location."
+                )
+            }
+        }
+    }
+
+    fun resetLocationAssignmentState() {
+        locationAssignmentState = LocationAssignmentState.Idle
     }
 
     private fun loadSpools(initialLoad: Boolean) {
@@ -104,6 +210,7 @@ class SpoolViewModel(spoolmanUrl: String) : ViewModel() {
                 weight = convertWeightDoubleToString(spool.filament.weight),
                 diameter = spool.filament.diameter,
                 comment = spool.comment,
+                location = spool.location.orEmpty(),
                 totalWeight = totalWeightLabel,
                 remainingWeight = remainingWeightLabel,
                 remainingFraction = remainingFraction,
