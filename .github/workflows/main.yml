@@ -1,2 +1,22 @@
-- name: Build and Publish release APK from your Android project
-  uses: Kang-Jacob-GitLB/action-release-apk@1.0.0
+name: Build and Publish release APK
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build and Publish release APK from your Android project
+        uses: Kang-Jacob-GitLB/action-release-apk@1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_FOLDER: app
