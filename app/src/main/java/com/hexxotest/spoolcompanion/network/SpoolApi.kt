@@ -2,7 +2,9 @@ package com.hexxotest.spoolcompanion.network
 
 import com.hexxotest.spoolcompanion.network.data.SpoolItem
 import kotlinx.serialization.json.Json
+import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
@@ -11,6 +13,9 @@ import retrofit2.http.PATCH
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.net.URI
+import java.net.InetAddress
+import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 
 @kotlinx.serialization.Serializable
 data class SpoolLocationUpdate(
@@ -43,6 +48,26 @@ fun normalizeSpoolmanUrl(rawUrl: String): String {
     ).toString().trimEnd('/')
 }
 
+private class RetryingDns(
+    private val attempts: Int = 3,
+    private val retryDelayMs: Long = 150
+) : Dns {
+    override fun lookup(hostname: String): List<InetAddress> {
+        var lastError: UnknownHostException? = null
+        repeat(attempts) { attempt ->
+            try {
+                return Dns.SYSTEM.lookup(hostname)
+            } catch (error: UnknownHostException) {
+                lastError = error
+                if (attempt + 1 < attempts) {
+                    Thread.sleep(retryDelayMs)
+                }
+            }
+        }
+        throw lastError ?: UnknownHostException(hostname)
+    }
+}
+
 class SpoolApi(
     baseUrl: String = ""
 ) {
@@ -69,7 +94,14 @@ class SpoolApi(
 
     // baseUrl is expected to be the server root (without trailing /api/v1).
     private val normalizedBaseUrl = normalizeSpoolmanUrl(baseUrl)
+    private val httpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(true)
+        .dns(RetryingDns())
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
     private val retrofit = Retrofit.Builder()
+        .client(httpClient)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .baseUrl("$normalizedBaseUrl/api/v1/")
         .build()
